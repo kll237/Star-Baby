@@ -1,0 +1,3 @@
+# DEPRECATED — 此文件已弃用，请勿使用。
+# 已拆分为 frontend/nginx/http.conf.template 与 frontend/nginx/https.conf.template，
+# 由 frontend/nginx/entrypoint.sh 在容器启动时按 ${DOMAIN} 注入生成 conf.d 配置。

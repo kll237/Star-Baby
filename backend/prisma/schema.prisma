@@ -1,0 +1,618 @@
+// ============================================================
+// Prisma Schema — 特殊儿童情绪及动作行为识别与智能干预系统
+// 阶段一：双端用户体系
+// 阶段二：学生端实时检测引擎（情绪 + 动作行为）
+// 主数据库：PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- 枚举 ----------------
+enum Role {
+  PARENT
+  TEACHER
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+enum SmsPurpose {
+  REGISTER
+  RESET_PASSWORD
+}
+
+// 阶段二：检测相关枚举
+enum DetectionSource {
+  CAMERA
+  VIDEO_UPLOAD
+}
+
+enum SessionStatus {
+  RUNNING
+  ENDED
+}
+
+enum FaceAlgorithm {
+  FACE_API_TINY
+  FACE_API_SSD
+  INSIGHTFACE
+  CUSTOM
+}
+
+// 阶段三：智能聊天安抚相关枚举
+enum ComfortCategory {
+  CBT            // 认知行为疗法话术
+  MINDFULNESS    // 正念觉察
+  BREATHING      // 呼吸放松
+  GROUNDING      // 着陆技术（5-4-3-2-1 感官）
+  VALIDATION     // 情绪确认 / 共情
+  ENCOURAGEMENT  // 鼓励赋能
+  DISTRACTION    // 转移注意
+  ROUTINE        // 行为引导 / 常规
+}
+
+enum ChatRole {
+  SYSTEM
+  ASSISTANT
+  USER
+  SCRIPT
+}
+
+enum ChatTrigger {
+  DETECTION // 由情绪检测自动触发
+  MANUAL    // 学生 / 家长主动发起
+}
+
+enum ChatStatus {
+  ACTIVE
+  ENDED
+}
+
+enum LlmProvider {
+  RULE   // 规则 / 话术库（无需外部 API，默认）
+  MOCK   // 测试桩
+  OPENAI // OpenAI 兼容接口
+  ZHIPU  // 智谱 BigModel（GLM-4-Flash 免费）
+}
+
+// 危机等级（用于安全事件分级与监护人提醒强度）
+enum SafetyLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// 反馈类型（学生对星宝回复的 👍/👎）
+enum FeedbackKind {
+  LIKE
+  DISLIKE
+}
+
+enum MediaEngine {
+  BROWSER // 由浏览器端 Web Speech API 处理
+  SERVER  // 由服务端 TTS/ASR 引擎处理
+}
+
+// ---------------- 用户（家长 / 教师） ----------------
+model User {
+  id           String     @id @default(cuid())
+  account      String     @unique // 登录账号，唯一
+  passwordHash String
+  nickname     String
+  phone        String     @unique
+  email        String?    @unique // 真实邮箱（危机短信/邮件提醒接收渠道）
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  lockedUntil  DateTime? // 登录失败锁定截止时间
+  lastLoginAt  DateTime?
+  privacyConsentAt     DateTime? // 隐私协议同意时间（注册时勾选留痕）
+  privacyConsentVersion String?  // 同意时签署的协议版本
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // 关系
+  ownedStudents Student[]                      @relation("StudentOwner")
+  guardianStudents Student[]                   @relation("StudentGuardians")
+  refreshTokens RefreshToken[]
+  auditLogs    AuditLog[]
+  alertLogs    AlertLog[]                      @relation("AlertLogUser")
+  consentRecords ConsentRecord[]               @relation("ConsentRecordGuardian")
+
+  @@index([role])
+  @@index([phone])
+}
+
+// ---------------- 学生 ----------------
+model Student {
+  id        String           @id @default(cuid())
+  name      String
+  gender    Gender           @default(UNKNOWN)
+  birthDate DateTime?
+  avatarUrl String?
+  remarks   String?
+  status    UserStatus       @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // 创建者（家长 / 教师）
+  ownerId String
+  owner   User   @relation("StudentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // 关联的多位家长 / 教师
+  guardians        User[]             @relation("StudentGuardians")
+  faceDescriptors  FaceDescriptor[]
+  detectionSessions DetectionSession[]
+  chatSessions     ChatSession[]
+  chatMessages     ChatMessage[]
+  reportRecords    ReportRecord[]
+  adviceRecords    AdviceRecord[]
+  deskPetDevices   DeskPetDevice[]
+  deskPetEvents    DeskPetEvent[]
+  consentAt        DateTime? // 监护人知情同意时间（儿童心理健康数据合规留痕）
+  isDemo           Boolean   @default(false) // 演示账号隔离标记（不进入真实看板统计）
+  profile          StudentProfile?
+  safetyEvents     SafetyEvent[]
+  alertLogs        AlertLog[]
+  consentRecords   ConsentRecord[]
+
+  @@index([ownerId])
+}
+
+// ---------------- 学生基础画像（关联时填写，用于星宝个性化安抚） ----------------
+model StudentProfile {
+  id        String   @id @default(cuid())
+  studentId String   @unique
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  // 基础状况
+  conditionType     String   @default("其他") // 抑郁症 / 自闭症 / 多动症 / 焦虑症 / 其他
+  conditionSeverity String   @default("未知") // 轻度 / 中度 / 重度
+  symptoms          String[] @default([]) // 其他特殊症状
+
+  // 个性化信息（用于星宝「针对性」聊天安抚）
+  likes     String[] @default([]) // 喜欢什么
+  hobbies   String[] @default([]) // 爱好什么
+  strengths String[] @default([]) // 擅长什么
+  dislikes  String[] @default([]) // 不喜欢什么
+
+  notes     String? // 补充说明
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+// ---------------- 人脸特征向量（加密存储） ----------------
+model FaceDescriptor {
+  id        String       @id @default(cuid())
+  studentId String
+  student   Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  // AES-256-GCM 加密后的向量 JSON（含 iv / tag / ciphertext）
+  payload   String
+  algorithm FaceAlgorithm @default(FACE_API_TINY)
+  // 活体检测是否通过（注册流程前端配合活体 SDK 回传）
+  livenessPassed Boolean @default(false)
+  // 采集角度标识（front/left/right/up/down），便于多模态注册
+  angle     String       @default("front")
+  createdAt DateTime     @default(now())
+
+  @@index([studentId])
+}
+
+// ---------------- 短信验证码 ----------------
+model SmsCode {
+  id        String     @id @default(cuid())
+  phone     String
+  code      String
+  purpose   SmsPurpose
+  expiresAt DateTime
+  consumed  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  @@index([phone, purpose])
+}
+
+// ---------------- 刷新令牌（记住登录） ----------------
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}
+
+// ---------------- 审计日志 ----------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  resource  String?
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+}
+
+// ============================================================
+// 阶段二：实时检测数据
+// ============================================================
+
+// 检测会话（一次连续采集过程）
+model DetectionSession {
+  id        String          @id @default(cuid())
+  studentId String
+  student   Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  source    DetectionSource @default(CAMERA)
+  status    SessionStatus   @default(RUNNING)
+  fps       Float?
+  deviceInfo String?
+  startedAt DateTime        @default(now())
+  endedAt   DateTime?
+
+  frames EmotionFrame[]
+  events BehaviorEvent[]
+
+  @@index([studentId])
+  @@index([studentId, startedAt])
+}
+
+// 情绪帧（每帧的 7 类情绪置信度 + 综合评分）
+model EmotionFrame {
+  id            String   @id @default(cuid())
+  sessionId     String
+  session       DetectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId     String
+  ts            DateTime @default(now())
+  // 7 类情绪置信度（0-100），键见 EMOTION_KEYS
+  scores        Json
+  dominant       String
+  compositeScore Float
+  negative       Boolean  @default(false)
+
+  @@index([sessionId])
+  @@index([studentId])
+  @@index([studentId, ts])
+}
+
+// 行为事件（动作行为识别结果）
+model BehaviorEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   DetectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId String
+  ts        DateTime @default(now())
+  behavior  String // 见 BEHAVIOR_KEYS
+  confidence Float
+  source    String   @default("motion") // motion | pose | audio
+
+  @@index([sessionId])
+  @@index([studentId])
+  @@index([studentId, ts])
+}
+
+// ============================================================
+// 阶段三：智能聊天安抚系统
+// ============================================================
+
+// 安抚话术库（CBT / 正念 / 呼吸 / 着陆 / 共情 / 鼓励 / 转移 / 常规）
+model ComfortScript {
+  id             String          @id @default(cuid())
+  category       ComfortCategory
+  technique      String // 具体技术名，如 "4-7-8 呼吸"、"思维记录表"
+  triggerEmotion String? // 适配的触发情绪（EMOTION_KEYS），空表示通用
+  content        String // 话术正文（支持 {name} 占位）
+  followUp       String? // 可选追问 / 引导语
+  tone           String         @default("warm") // warm | playful | calm
+  tags           String[]       @default([])
+  priority       Int            @default(0) // 越大越优先
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([category])
+  @@index([triggerEmotion])
+}
+
+// 安抚对话会话
+model ChatSession {
+  id             String       @id @default(cuid())
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  triggerEmotion String?
+  triggerSource  ChatTrigger  @default(MANUAL)
+  status         ChatStatus   @default(ACTIVE)
+  llmProvider    LlmProvider  @default(RULE)
+  startedAt      DateTime     @default(now())
+  endedAt        DateTime?
+  messageCount   Int          @default(0)
+  summary        String? // 会话小结（结束时生成）
+
+  messages ChatMessage[]
+  safetyEvents SafetyEvent[]
+
+  @@index([studentId])
+  @@index([studentId, startedAt])
+}
+
+// 对话消息
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  role      ChatRole
+  content   String
+  technique String? // 使用的技术 / 话术类别
+  scriptId  String? // 命中的话术库条目
+  audioUrl  String? // TTS 音频地址（若启用服务端 TTS）
+  feedback  String? // LIKE | DISLIKE | null（学生/家长对回复的评价，用于模型/话术迭代）
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId])
+  @@index([studentId])
+}
+
+// 安全事件（危机干预闭环留痕：检测到危机关键词 → 记录 + 通知监护人）
+model SafetyEvent {
+  id            String      @id @default(cuid())
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sessionId     String?
+  session       ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  level         SafetyLevel @default(HIGH)
+  sourceText    String // 触发危机的原始用户输入
+  replySummary  String // 星宝给出的回复摘要（不暴露完整聊天细节）
+  category      String      @default("CRISIS_SUPPORT")
+  notifyStatus  String      @default("PENDING") // PENDING | SENT | FAILED
+  notifiedAt    DateTime?
+  acknowledged  Boolean     @default(false) // 监护人/教师是否已知悉
+  acknowledgedAt DateTime?
+  handledBy     String? // 处理人（监护人/教师 userId）
+  resolved      Boolean     @default(false)
+  resolvedAt    DateTime?
+  note          String? // 处理备注
+  createdAt     DateTime    @default(now())
+
+  @@index([studentId])
+  @@index([studentId, createdAt])
+  @@index([acknowledged])
+}
+
+// 站内信（通用通知：危机告警、周报、系统公告等）
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String // 接收人（监护人/教师）
+  type      String   // CRISIS_ALERT | CHAT_SUMMARY | SYSTEM
+  title     String
+  body      String
+  relatedStudentId String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, read])
+}
+
+// 危机/风险升级触达日志（短信/邮件/站内信，便于追溯投递状态）
+model AlertLog {
+  id        String   @id @default(cuid())
+  userId    String   // 接收人（监护人/教师）
+  user      User     @relation("AlertLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  channel   String   // SMS | EMAIL | INAPP
+  level     String   // LOW | MEDIUM | HIGH | CRITICAL
+  kind      String   @default("CRISIS") // CRISIS | RISK | SUMMARY
+  title     String
+  body      String
+  status    String   @default("PENDING") // PENDING | SENT | FAILED
+  error     String?
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([studentId])
+  @@index([createdAt])
+}
+
+// 知情同意记录历史（签署 / 撤回 / 重新签署，合规留痕）
+model ConsentRecord {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardianId  String   // 签署人（监护人/教师 userId）
+  guardian    User     @relation("ConsentRecordGuardian", fields: [guardianId], references: [id], onDelete: Cascade)
+  action      String   // SIGNED | REVOKED | RESIGNED
+  version     String   // 协议版本
+  contentHash String?  // 协议全文哈希（留痕）
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+  @@index([guardianId])
+  @@index([createdAt])
+}
+
+// ============================================================
+// 阶段四：家长 / 教师数据看板与报告
+// ============================================================
+
+// 报告周期维度
+enum ReportPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+// 报告导出格式
+enum ReportFormat {
+  JSON
+  CSV
+  PDF
+}
+
+// 报告导出记录（便于追溯 / 商业化留存）
+model ReportRecord {
+  id           String       @id @default(cuid())
+  studentId    String
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type         ReportPeriod @default(CUSTOM)
+  periodFrom   DateTime
+  periodTo     DateTime
+  format       ReportFormat
+  generatedById String?
+  createdAt    DateTime     @default(now())
+
+  @@index([studentId])
+  @@index([studentId, createdAt])
+}
+
+// ============================================================
+// 阶段五：专业心理建议引擎与知识库
+// ============================================================
+
+// 知识库分类（覆盖特殊儿童干预的主要维度）
+enum KnowledgeCategory {
+  EMOTION_REGULATION    // 情绪调节
+  SOCIAL_SKILL          // 社交技能
+  BEHAVIOR_INTERVENTION // 行为干预
+  SENSORY_INTEGRATION   // 感觉统合
+  COMMUNICATION         // 沟通表达
+  FAMILY_LIFE           // 家庭生活
+  SCHOOL_ADAPTATION     // 学校适应
+  CRISIS_INTERVENTION   // 危机干预
+  PARENT_GUIDANCE       // 家长指导
+  TEACHER_STRATEGY      // 教师策略
+  COGNITIVE_TRAINING    // 认知训练
+  ROUTINE_BUILDING      // 常规建立
+}
+
+// 建议严重度（决定呈现与处置优先级）
+enum AdviceSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// 建议/知识的适用对象
+enum AdviceTarget {
+  ALL
+  PARENT
+  TEACHER
+  STUDENT
+}
+
+// 专业心理 / 特教知识库条目（≥200 条，可经 seed 写入）
+model KnowledgeItem {
+  id          String           @id @default(cuid())
+  category    KnowledgeCategory
+  title       String
+  content     String
+  summary     String?
+  source      String?          // 理论/方法来源，如 ABA / TEACCH / 正念 / CBT / 社交故事
+  severity    AdviceSeverity  @default(LOW)
+  target      AdviceTarget    @default(ALL)
+  applicableEmotions String[] // 适用情绪（EMOTION_KEYS 子集）
+  applicableBehaviors String[] // 适用行为（BEHAVIOR_KEYS 子集）
+  tags        String[]
+  reference   String?          // 文献 / 出处
+  priority    Int              @default(0)
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([category])
+  @@index([severity])
+  @@index([isActive])
+  @@index([target])
+}
+
+// 按周期生成的专业建议记录（便于追溯 / 商业化留存）
+model AdviceRecord {
+  id          String          @id @default(cuid())
+  studentId   String
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  periodFrom  DateTime
+  periodTo    DateTime
+  severity    AdviceSeverity @default(LOW)
+  summary     String
+  items       Json            // 生成的建议条目（含 knowledgeItemId / title / 理由 / 个性化）
+  generatedById String?
+  createdAt   DateTime        @default(now())
+
+  @@index([studentId])
+  @@index([studentId, createdAt])
+}
+
+// ============================================================
+// 阶段六：桌宠硬件接口（WebSocket + MQTT）
+// 把检测 / 安抚 / 建议事件映射为「桌宠反应」，通过 WebSocket 与 MQTT 双通道推送给
+// 前端虚拟桌宠与实体机器人桌宠等硬件。
+// ============================================================
+
+// 桌宠设备类型（虚拟桌宠 / 实体机器人 / 屏幕挂件）
+enum DeskPetDeviceType {
+  VIRTUAL // 前端虚拟桌宠
+  ROBOT   // 实体机器人桌宠
+  SCREEN  // 屏幕挂件 / 其他硬件
+}
+
+// 已注册的桌宠设备（家长/教师可为一个学生绑定多台桌宠）
+model DeskPetDevice {
+  id          String            @id @default(cuid())
+  deviceId    String            @unique // 硬件序列号 / 客户端实例标识
+  name        String
+  studentId   String
+  student     Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type        DeskPetDeviceType @default(VIRTUAL)
+  topicPrefix String            @default("deskpet") // MQTT 主题前缀
+  isActive    Boolean           @default(true)
+  lastSeenAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([studentId])
+}
+
+// 桌宠反应事件（按 mood 变化节流落库，便于追溯与回放）
+model DeskPetEvent {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type      String   // detection | risk | comfort | advice | command | heartbeat
+  reaction  Json     // PetReaction 快照（mood / animation / message / intensity）
+  source    String?  // 触发来源：detection / chat / advice / hardware
+  createdAt DateTime @default(now())
+
+  @@index([studentId])
+  @@index([studentId, createdAt])
+}

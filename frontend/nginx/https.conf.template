@@ -1,0 +1,90 @@
+# HTTPS server：业务入口（仅当 Let's Encrypt 证书已签发时由 entrypoint 启用）
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # HSTS：强制浏览器后续只走 HTTPS（含子域）
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    server_tokens off;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/json application/javascript application/xml application/xml+rss text/javascript image/svg+xml;
+
+    client_max_body_size 8m;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # 静态资源缓存（带指纹的文件长期缓存，index.html 不缓存）
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # Swagger 文档代理（仅演示/运维查看，可按需注释关闭）
+    location /docs/ {
+        proxy_pass http://backend:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location = /docs {
+        return 301 /docs/;
+    }
+
+    # 认证类接口：更严格速率限制（防暴力破解 / 短信轰炸）
+    location /api/auth/ {
+        limit_req zone=login burst=5 nodelay;
+        proxy_pass http://backend:3000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # 一般 REST API 代理（含 /api 前缀，与后端 setGlobalPrefix('api') 一致）
+    location /api/ {
+        limit_req zone=api burst=60 nodelay;
+        proxy_pass http://backend:3000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # WebSocket：Socket.IO（实时检测 / 聊天安抚 / 桌宠 均经 /socket.io/ 传输）
+    location /socket.io/ {
+        limit_req zone=api burst=120 nodelay;
+        proxy_pass http://backend:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # SPA 路由回退（必须在所有 API / WS 规则之后）
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+    }
+}

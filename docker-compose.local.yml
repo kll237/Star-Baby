@@ -1,0 +1,47 @@
+# 本地开发一键起依赖（用于「不开 WorkBuddy」时在本机启动项目）
+#
+# 适用场景：在局域网内用 https://<本机局域网IP>:3300 访问（自签 HTTPS + 后端托管前端）。
+# 与 docker-compose.yml（公网 HTTPS 云部署版）不同，本文件只起依赖，并把端口映射到
+# backend/.env 里写的 localhost:5432 / localhost:6379 / localhost:1883，backend 仍用 Node 本地跑。
+#
+# 用法：
+#   1) docker compose -f docker-compose.local.yml up -d      # 起依赖（首次联网拉镜像，较慢）
+#   2) cd backend && npx prisma migrate deploy              # 仅首次/空库时需要，建表
+#   3) cd backend && npm run start                          # 起后端（3300 端口，自签 HTTPS）
+#
+# 停止依赖：docker compose -f docker-compose.local.yml stop   （保留数据，下次 up 即可）
+# 彻底删除：docker compose -f docker-compose.local.yml down   （会删容器，数据卷 spc-pgdata 仍保留）
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spc-postgres
+    restart: unless-stopped
+    environment:
+      # 必须与 backend/.env 的 DATABASE_URL 一致：
+      # postgresql://spchild:spchild_pass@localhost:5432/spchild?schema=public
+      POSTGRES_USER: spchild
+      POSTGRES_PASSWORD: spchild_pass
+      POSTGRES_DB: spchild
+    ports:
+      - "5432:5432"
+    volumes:
+      - spc-pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: spc-redis
+    restart: unless-stopped
+    # 注意：本地 backend/.env 的 REDIS_PASSWORD 为空，因此这里不设置密码
+    ports:
+      - "6379:6379"
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: spc-mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+
+volumes:
+  spc-pgdata:

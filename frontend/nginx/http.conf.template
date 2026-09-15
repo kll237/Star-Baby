@@ -1,0 +1,19 @@
+# HTTP server：仅做 ACME 验证 + 强制跳转 HTTPS
+# 始终启用（即使证书尚未签发，80 端口也必须可用以完成 Let's Encrypt 验证）
+limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt HTTP-01 验证目录（certbot --webroot 写入）
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # 其余全部 301 跳转 HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

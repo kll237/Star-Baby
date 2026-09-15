@@ -1,0 +1,132 @@
+# 特殊儿童情绪及动作行为识别与智能干预系统 — 公网 HTTPS 一键部署
+# 包含：PostgreSQL + Redis + MQTT + 后端(NestJS) + 前端(Nginx + Let's Encrypt TLS 终止)
+#
+# 使用前：
+#   1) cp deploy/.env.production deploy/.env.production.local  并填写 DOMAIN / EMAIL / 强密码
+#      （或直接 export 这些变量后，用：docker compose --env-file deploy/.env.production up -d --build）
+#   2) 把域名 DNS 的 A 记录指向本服务器公网 IP，并开放 80/443 入站
+#   3) docker compose up -d --build
+#   4) docker compose run --rm certbot certonly   # 首次签发 Let's Encrypt 证书
+#   5) docker compose restart frontend            # 加载 443 配置
+#   6) 浏览器访问 https://${DOMAIN}
+#
+# 端口策略（安全收敛）：
+#   - 仅暴露 80(ACME 验证 + 跳转) 与 443(业务)；其余服务仅容器网络内可达
+#   - TLS 由前端 Nginx 终止；后端只跑内网 HTTP（ENABLE_HTTPS=false）
+#   - 数据库 / Redis / MQTT 不映射宿主机端口，避免公网暴露
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-spchild}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-spchild}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-spchild} -d ${DB_NAME:-spchild}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [spc]
+    # 不映射宿主机端口：仅容器网络内可达
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [spc]
+
+  # MQTT broker（桌宠硬件跨进程联动）
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -t __health -m ping && mosquitto_sub -h 127.0.0.1 -p 1883 -t __health -C 1 -W 2 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [spc]
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # 容器内使用服务名访问
+      DATABASE_URL: "postgresql://${DB_USER:-spchild}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-spchild}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      MQTT_URL: "mqtt://mosquitto:1883"
+      MQTT_TOPIC_PREFIX: "deskpet"
+      # 前端经 Nginx 同源(HTTPS)访问，CORS 收紧为具体域名
+      CORS_ORIGIN: "https://${DOMAIN}"
+      # 云部署：TLS 由前端 Nginx 终止，后端只跑内网 HTTP
+      ENABLE_HTTPS: "false"
+      # 前端由独立 frontend 容器托管，后端不托管静态资源
+      FRONTEND_DIST: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [spc]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # 生产镜像固定以 /api 为接口前缀（与后端 setGlobalPrefix('api') 一致）
+        VITE_API_BASE: "/api"
+    restart: unless-stopped
+    environment:
+      - DOMAIN=${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 只读挂载证书与 ACME 挑战目录
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - backend
+      - certbot
+    networks: [spc]
+
+  # Let's Encrypt 证书签发与自动续期
+  # 首次：docker compose run --rm certbot certonly
+  # 续期：本服务每隔约 12h 自动执行 certbot renew（证书 <30 天即续）
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks: [spc]
+
+networks:
+  spc:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:

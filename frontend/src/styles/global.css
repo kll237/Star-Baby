@@ -1,0 +1,256 @@
+:root {
+  /* 特殊儿童友好配色：柔和暖色，避免焦虑的红色闪烁 */
+  --color-bg: #fff7ef;
+  --color-surface: #ffffff;
+  --color-primary: #ff9f43; /* 温暖橙 */
+  --color-primary-dark: #f08a1d;
+  --color-accent: #54a0ff; /* 柔和蓝 */
+  --color-text: #34495e;
+  --color-text-soft: #7f8c9a;
+  --color-success: #2ecc71;
+  --color-warning: #f1c40f;
+  --color-danger: #e67e22; /* 用橙红替代刺眼纯红 */
+  --radius: 18px;
+  --shadow: 0 8px 24px rgba(255, 159, 67, 0.18);
+  --font: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font);
+}
+
+/* 大按钮：核心操作一屏可达、单次操作不超过 2 步 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 0 28px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow: var(--shadow);
+  transition: transform 0.12s ease, background 0.2s ease;
+}
+.btn:hover {
+  background: var(--color-primary-dark);
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn.secondary {
+  background: var(--color-accent);
+}
+.btn.ghost {
+  background: var(--color-surface);
+  color: var(--color-primary-dark);
+  border: 2px solid var(--color-primary);
+  box-shadow: none;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 18px;
+  font-size: 18px;
+  border: 2px solid #ffe3c9;
+  border-radius: 14px;
+  outline: none;
+  background: #fffdfb;
+}
+.input:focus {
+  border-color: var(--color-primary);
+}
+
+.label {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text-soft);
+}
+
+.center-screen {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 0 6px;
+}
+.subtitle {
+  color: var(--color-text-soft);
+  margin: 0 0 22px;
+  font-size: 16px;
+}
+
+.hint {
+  font-size: 14px;
+  color: var(--color-text-soft);
+}
+.error {
+  color: var(--color-danger);
+  font-size: 15px;
+  margin-top: 10px;
+}
+
+/* 摄像头画面柔和圆角，避免尖锐视觉 */
+.video-frame {
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: #2c3e50;
+  border: 4px solid #ffe3c9;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ============================================================
+ * 特征 8：无障碍与一致性 UX
+ * - 默认较大字号、较高对比，方便特殊儿童与家长阅读
+ * - 尊重系统「减少动效」偏好；提供应用内「减少动效」开关（.reduced-motion）
+ * - 风险/提醒一律使用柔和脉冲，不使用刺眼红色闪烁
+ * ============================================================ */
+html {
+  font-size: 17px;
+}
+body {
+  color: #2c2c2c; /* 提高默认文字对比度 */
+}
+
+/* 系统级减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 应用内「减少动效」开关：用户（尤其对闪烁敏感的自闭症儿童）可一键关闭所有动画 */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* ============================================================
+ * 特征 9：外观 / 无障碍统一控制器
+ * - useAppearance 在 <html> 上挂 bg-adjusted，并写入 --bg-overlay-alpha
+ * - 以下规则统一接管各页面背景蒙层（集中在 global，避免逐页改样式）
+ * - 背景强度越低 / 简洁模式开启时，蒙层越厚，图片越淡，内容越清晰
+ * ============================================================ */
+:root {
+  --bg-overlay-alpha: 0.3;
+  --bg-veil: 255, 250, 245;
+}
+
+html.bg-adjusted .login-overlay,
+html.bg-adjusted .dash-bg-overlay,
+html.bg-adjusted .chat-bg-overlay,
+html.bg-adjusted .pd-bg-overlay,
+html.bg-adjusted .sl-bg-overlay,
+html.bg-adjusted .dp-bg-overlay,
+html.bg-adjusted .adult-bg-overlay {
+  background: rgba(var(--bg-veil), var(--bg-overlay-alpha)) !important;
+  backdrop-filter: blur(2px);
+}
+/* 登录页视频同样被蒙层盖住，达成「简洁」 */
+html.bg-adjusted .login-video {
+  filter: saturate(0.8) brightness(0.96);
+}
+
+/* ============================================================
+ * 移动端 / 平板适配
+ * ============================================================ */
+@media (max-width: 720px) {
+  html {
+    font-size: 16px;
+  }
+  .card {
+    padding: 18px;
+  }
+  .pd,
+  .dp-wrap {
+    padding: 14px 12px 76px; /* 底部给移动 Tab 栏留白 */
+  }
+  .title {
+    font-size: 23px;
+  }
+  /* 工作台头部在窄屏改为纵向堆叠 */
+  .pd-head,
+  .adult-head {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+  }
+  .pd-head .row,
+  .adult-head .row {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .btn {
+    font-size: 18px;
+    min-height: 50px;
+    padding: 0 18px;
+  }
+  .center-screen {
+    padding: 16px;
+  }
+  /* 聊天卡片在手机上占满 */
+  .chat-with-bg .chat-card {
+    width: 100% !important;
+    height: 82vh;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1024px) {
+  .pd,
+  .dp-wrap {
+    max-width: 100%;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

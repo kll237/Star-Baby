@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+coverage-e2e/
+.env
+.env.local
+*.log
+.DS_Store

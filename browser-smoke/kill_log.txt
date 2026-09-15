@@ -1,0 +1,11 @@
+﻿CIM count=9
+PID=25504 CMD="C:\Program Files\Common Files\Adobe\Creative Cloud Libraries\libs\node.exe" "C:\Program Files\Common Files\Adobe\Creative Cloud Libraries\js\server.js"
+PID=41160 CMD=C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2\node.exe C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2/node_modules/npm/bin/npx-cli.js jest --runInBand
+PID=27280 CMD="node"   "C:\Users\Administrator\WorkBuddy\2026-08-14-17-02-50\backend\node_modules\.bin\\..\jest\bin\jest.js" --runInBand
+PID=26876 CMD=C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2\node.exe C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2/node_modules/npm/bin/npx-cli.js vite --port 5188 --host
+PID=33776 CMD="node"   "C:\Users\Administrator\WorkBuddy\2026-08-14-17-02-50\frontend\node_modules\.bin\\..\vite\bin\vite.js" --port 5188 --host
+PID=37372 CMD="C:\Program Files\Adobe\Adobe Creative Cloud Experience\libs\node.exe" "C:\Program Files\Adobe\Adobe Creative Cloud Experience\js\main.js"
+PID=50096 CMD="C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2\node.exe"  "C:\Users\Administrator\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.5.111/dist/mcp-server.mjs"
+PID=48232 CMD=C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2\node.exe dist/main.js
+KILLED 48232
+PID=44204 CMD="C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2\node.exe"  "C:\Users\Administrator\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.5.111/dist/mcp-server.mjs"
