@@ -60,3 +60,7 @@ README.old.md
 acl_log.txt
 icacls_log.txt
 ps_log.txt
+
+# --- auto-clean: 构建/调试临时产物 ---
+*.timestamp-*.mjs
+backend/portcheck.txt
