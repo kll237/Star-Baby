@@ -313,10 +313,19 @@
       <!-- 特征 6：自然语言周报 -->
       <section class="card narrative">
         <h2>📝 一句话周报（可直接转发家长）</h2>
-        <p class="nar-text">{{ dash.narrative.narrative || '该周期暂无可汇总的数据。' }}</p>
-        <ul v-if="dash.narrative.highlights.length" class="nar-list">
-          <li v-for="(h, i) in dash.narrative.highlights" :key="i">{{ h }}</li>
-        </ul>
+        <div class="nar-actions">
+          <button class="ghost sm" :disabled="streaming || !dash" @click="streamNarrative">
+            {{ streaming ? '生成中…' : '⚡ 流式生成' }}
+          </button>
+          <button v-if="streaming" class="ghost sm" @click="stopStream">停止</button>
+        </div>
+        <p v-if="streamingNarrative" class="nar-text nar-stream">{{ streamingNarrative }}<span v-if="streaming" class="caret">▋</span></p>
+        <template v-else>
+          <p class="nar-text">{{ dash.narrative.narrative || '该周期暂无可汇总的数据。' }}</p>
+          <ul v-if="dash.narrative.highlights.length" class="nar-list">
+            <li v-for="(h, i) in dash.narrative.highlights" :key="i">{{ h }}</li>
+          </ul>
+        </template>
       </section>
 
       <!-- 特征 7：风险分级总结 -->
@@ -470,6 +479,11 @@ watch(error, (v) => {
 const dash = ref<DashboardData | null>(null);
 const profile = ref<StudentProfile | null>(null);
 
+// 情绪分析报告 SSE 流式输出（与 WebSocket 告警通道形成双通道）
+const streamingNarrative = ref('');
+const streaming = ref(false);
+let streamAbort: AbortController | null = null;
+
 // 聊天陪伴概览（近 30 天）
 const summary = ref<ChatSummary | null>(null);
 // 危机安全事件（闭环留痕）
@@ -502,6 +516,59 @@ async function loadProfile() {
   } catch {
     profile.value = null;
   }
+}
+
+/**
+ * 订阅后端 SSE 端点（reports/students/:id/analysis-stream），以流式方式渲染
+ * 情绪分析报告。EventSource 无法携带 Authorization 头，这里用 fetch + 流式
+ * 读取（同样消费 text/event-stream），按 `data:` 帧累加文本，收到 [DONE] 结束。
+ */
+async function streamNarrative() {
+  if (!studentId.value || streaming.value) return;
+  streaming.value = true;
+  streamingNarrative.value = '';
+  streamAbort = new AbortController();
+  const token = localStorage.getItem('sp_token');
+  const params = new URLSearchParams({ period: period.value, granularity: granularity.value });
+  if (fromD.value) params.set('from', fromD.value);
+  if (toD.value) params.set('to', toD.value);
+  try {
+    const resp = await fetch(`${import.meta.env.VITE_API_BASE || '/api'}/reports/students/${studentId.value}/analysis-stream?${params.toString()}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: streamAbort.signal,
+    });
+    if (!resp.ok || !resp.body) throw new Error(`SSE ${resp.status}`);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop() || '';
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') {
+          streaming.value = false;
+          return;
+        }
+        streamingNarrative.value += payload;
+      }
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') streamingNarrative.value = '流式生成失败，请查看下方完整周报。';
+  } finally {
+    streaming.value = false;
+    streamAbort = null;
+  }
+}
+
+function stopStream() {
+  streamAbort?.abort();
+  streaming.value = false;
 }
 
 const granularityText = computed(() => ({ day: '按天', week: '按周', month: '按月' }[granularity.value]));
@@ -947,6 +1014,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // 视图卸载仅释放本视图的引用；若 App.vue 仍持有全局连接则不真正断开
   disconnectAlerts();
+  stopStream();
 });
 </script>
 
@@ -1068,6 +1136,10 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 
 /* 特征 6：周报 */
 .narrative { background: #f3f8ff; }
+.nar-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+.nar-stream { white-space: pre-wrap; }
+.caret { animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
 .nar-text { font-size: 16px; line-height: 1.8; color: #2c3e50; margin: 0 0 10px; }
 .nar-list { margin: 0; padding-left: 18px; font-size: 13px; color: #555; line-height: 1.9; }
 
