@@ -52,7 +52,8 @@ async function main() {
       account: 'admin01',
       passwordHash,
       nickname: '系统管理员',
-      phone: '13800000000',
+      // 注意：手机号在库内唯一，13800000000 已被既有演示家长占用，此处另取一号
+      phone: '13800000009',
       role: 'ADMIN',
     },
   });
