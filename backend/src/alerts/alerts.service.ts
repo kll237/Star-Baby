@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
 import { MailService } from '../mail/mail.service';
+import { CacheService } from '../cache/cache.service';
 import { AlertGateway } from './alerts.gateway';
 
 export interface GuardianContact {
@@ -34,6 +35,7 @@ export class AlertService {
     private readonly prisma: PrismaService,
     private readonly sms: SmsService,
     private readonly mail: MailService,
+    private readonly cache: CacheService,
     private readonly gateway: AlertGateway,
   ) {}
 
@@ -172,6 +174,8 @@ export class AlertService {
         })
         .catch(() => {});
     }
+    // 写时失效：本次触达落库后清空该学生的「最近告警」缓存，保证下次读取回源最新数据。
+    await this.cache.delete(CacheService.key('alert:recent', [input.studentId]));
     return { notified: contacts.length };
   }
 
@@ -304,6 +308,8 @@ export class AlertService {
     await this.prisma.safetyEvent
       .update({ where: { id: evt.id }, data: { notifyStatus: 'SENT', notifiedAt: new Date() } })
       .catch(() => {});
+    // 写时失效：本次触达落库后清空该学生的「最近告警」缓存，保证下次读取回源最新数据。
+    await this.cache.delete(CacheService.key('alert:recent', [opts.studentId]));
     return evt;
   }
 
@@ -378,11 +384,17 @@ export class AlertService {
       },
     });
     if (!ok) throw new NotFoundException('无权查看该学生的触达记录');
-    return this.prisma.alertLog.findMany({
+    // 最近告警缓存（TTL 30s）：权限校验后回源最近 200 条触达记录并回写，命中则直接返回。
+    const cacheKey = CacheService.key('alert:recent', [studentId]);
+    const cached = await this.cache.getJSON(cacheKey);
+    if (cached !== null) return cached;
+    const logs = await this.prisma.alertLog.findMany({
       where: { studentId },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
+    await this.cache.setJSON(cacheKey, logs, 30);
+    return logs;
   }
 
   async getContacts(studentId: string, userId: string) {

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException 
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
+import { CacheService } from '../cache/cache.service';
 import { Gender, Student } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
@@ -14,6 +15,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly mail: MailService,
+    private readonly cache: CacheService,
   ) {}
 
   /** 创建学生（由家长/教师创建，学生端无密码） */
@@ -278,7 +280,13 @@ export class UsersService {
   /** 获取学生基础画像（仅创建者/关联监护人可见）。 */
   async getProfile(userId: string, studentId: string) {
     await this.assertOwnerOrGuardian(userId, studentId);
-    return this.prisma.studentProfile.findUnique({ where: { studentId } });
+    // 热点用户配置缓存（TTL 60s）：命中则直接返回，未命中回源并回写。
+    const cacheKey = CacheService.key('user:profile', [studentId]);
+    const cached = await this.cache.getJSON(cacheKey);
+    if (cached !== null) return cached;
+    const profile = await this.prisma.studentProfile.findUnique({ where: { studentId } });
+    await this.cache.setJSON(cacheKey, profile, 60);
+    return profile;
   }
 
   /** 创建或更新学生基础画像（仅创建者/关联监护人可写）。 */
@@ -310,6 +318,10 @@ export class UsersService {
       where: { studentId },
       create: { studentId, ...data },
       update: data,
+    }).then(async (res) => {
+      // 写时失效：用户配置更新后让缓存进入回源，保证最终一致。
+      await this.cache.delete(CacheService.key('user:profile', [studentId]));
+      return res;
     });
   }
 
