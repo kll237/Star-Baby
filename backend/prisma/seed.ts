@@ -44,6 +44,19 @@ async function main() {
     },
   });
 
+  // 管理员账户：超级角色，可访问所有受 @Roles() 保护的接口（见 RolesGuard）
+  const admin = await prisma.user.upsert({
+    where: { account: 'admin01' },
+    update: {},
+    create: {
+      account: 'admin01',
+      passwordHash,
+      nickname: '系统管理员',
+      phone: '13800000000',
+      role: 'ADMIN',
+    },
+  });
+
   // 为学生端演示创建一名学生（无密码，由家长创建）
   let student = await prisma.student.findFirst({
     where: { name: '演示学生-小明', ownerId: parent.id },
@@ -140,6 +153,7 @@ async function main() {
   console.log('✅ 演示数据已写入：');
   console.log('   家长端: parent01 / Demo@123456 (手机 13800000001)');
   console.log('   教师端: teacher01 / Demo@123456 (手机 13800000002)');
+  console.log('   管理员: admin01 / Demo@123456 (超级角色，可访问全部接口)');
   console.log('   学生端: 演示学生-小明（已预置人脸，可用「演示登录」按钮）');
   console.log('   预置检测会话: 1 段（含 40 帧情绪 + 5 个行为事件）');
 

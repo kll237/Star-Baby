@@ -19,6 +19,7 @@ enum Role {
   PARENT
   TEACHER
   STUDENT
+  ADMIN
 }
 
 enum UserStatus {
