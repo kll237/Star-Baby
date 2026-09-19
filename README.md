@@ -332,6 +332,13 @@ npm run dev                              # http://localhost:5173，自动代理 
 - [x] 部署优化：统一 `/api` 前缀、Nginx 反代限流、安全响应头、审计、Redis 缓存、Docker·Compose、压测脚本
 - [x] 降级与兜底：MediaPipe 加载失败回退帧差 MotionTracker；Redis/MQTT 缺失降级内存/内置 Broker
 
+### 近期增强（与看板/RBAC/缓存相关）
+
+- **RBAC 超级角色**：`Role` 枚举新增 `ADMIN`，`RolesGuard` 对 `ADMIN` 放行所有受 `@Roles()` 保护的接口；`prisma/seed.ts` 内置 `admin01` 管理员账号。
+- **建议生成一致性**：`AdviceService.generateAdvice` 用 Prisma 交互式事务（`$transaction`）将「建议记录写入」与「审计日志写入」原子提交，任一失败整体回滚；桌宠推送在事务外失败软处理。
+- **情绪分析流式输出**：新增 `GET /reports/students/:id/analysis-stream` SSE 端点，按行切片逐段下发周报叙事；前端用 `fetch` 流式读取（EventSource 无法携带 JWT）并带闪烁光标渲染，与 WebSocket 告警通道形成双通道。
+- **Redis 缓存用户配置与告警**：`UsersService.getProfile` 缓存 60s（更新时写时失效）；`AlertService.listLogs`（最近告警）缓存 30s，危机/风险升级后失效，降低读路径压力并保持最终一致。
+
 **已知局限**：
 - 情绪 / 行为识别是**客户端规则式**（面部几何 + 姿态关键点 + 帧差），不是端到端深度学习模型；在光线差、遮挡、多人重叠时精度会下降。
 - 多数判定阈值仍为**经验值**；仓库已提供 `backend/scripts/tune-thresholds.ts` 网格搜索 + 一致性自检工具与合成标注样例，但**尚未用真实标注数据驱动自动调参**写入代码。
