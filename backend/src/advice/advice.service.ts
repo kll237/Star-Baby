@@ -252,25 +252,37 @@ export class AdviceService {
     const result = generateAdvice(seed, profile, { target: opts.target, topN: opts.topN });
 
     const { from, to } = dash.period;
-    const record = await this.prisma.adviceRecord.create({
-      data: {
-        studentId,
-        periodFrom: new Date(from),
-        periodTo: new Date(to),
-        severity: result.severity as any,
-        summary: result.summary,
-        items: result.topItems as any,
-        generatedById: opts.generatedById ?? null,
-      },
-    });
-    await this.audit.log({
-      userId: opts.generatedById ?? studentId,
-      action: 'advice.generate',
-      resource: 'AdviceRecord',
-      detail: { studentId, severity: result.severity, itemCount: result.topItems.length, recordId: record.id },
+    // 用 Prisma 交互式事务保证「建议记录写入」与「审计日志写入」的原子性：
+    // 任一失败整体回滚，避免出现有建议却无审计（或反之）的不一致状态。
+    const record = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.adviceRecord.create({
+        data: {
+          studentId,
+          periodFrom: new Date(from),
+          periodTo: new Date(to),
+          severity: result.severity as any,
+          summary: result.summary,
+          items: result.topItems as any,
+          generatedById: opts.generatedById ?? null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: opts.generatedById ?? studentId,
+          action: 'advice.generate',
+          resource: 'AdviceRecord',
+          detail: {
+            studentId,
+            severity: result.severity,
+            itemCount: result.topItems.length,
+            recordId: created.id,
+          } as any,
+        },
+      });
+      return created;
     });
 
-    // 阶段六：把专业建议推送为桌宠反应（WebSocket + MQTT）
+    // 阶段六：把专业建议推送为桌宠反应（WebSocket + MQTT），与主流程解耦，失败不影响已提交的建议
     this.deskpet.handleAdvice(studentId, { severity: result.severity }).catch(() => {});
 
     return { result, recordId: record.id, from, to };
